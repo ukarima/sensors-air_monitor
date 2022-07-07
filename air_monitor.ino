@@ -5,9 +5,7 @@
 Adafruit_BMP280 bmp;
 unsigned bmpStatus;
 
-float temperature = 0;
-float pressure = 0;
-float approxAltitude = 0;
+float temperature, pressure, approxAltitude = 0;
 
 //mq135
 #include <MQUnifiedsensor.h>
@@ -19,6 +17,8 @@ float approxAltitude = 0;
 #define ADC_Bit_Resolution (12) // ESP-32 bit resolution. Source: https://randomnerdtutorials.com/esp32-adc-analog-read-arduino-ide/
 #define RatioMQ135CleanAir 3.6 //RS / R0 = 3.6 ppm  
 
+bool gasStatus = true;
+float defaultValue = 0;
 MQUnifiedsensor MQ135(Board, Voltage_Resolution, ADC_Bit_Resolution, Pin, Type);
 
 //pm2.5
@@ -29,9 +29,7 @@ unsigned int samplingTime = 280;
 unsigned int deltaTime = 40;
 unsigned int sleepTime = 9680;
 
-float voMeasured = 0;
-float calcVoltage = 0;
-float dustDensity = 0;
+float voMeasured, calcVoltage, dustDensity = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -60,9 +58,9 @@ void setup() {
   }
   MQ135.setR0(calcR0/10);
   Serial.println("  done!.");
-  if(isinf(calcR0)) {Serial.println("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); while(1);}
-  if(calcR0 == 0){Serial.println("Warning: Conection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply"); while(1);}
-
+  if (isinf(calcR0) || calcR0 == 0) {
+    gasStatus = false;
+  }
 }
 
 void loop() {
@@ -84,6 +82,10 @@ void loop() {
   // https://www.elecrow.com/wiki/index.php?title=Dust_Sensor-_GP2Y1010AU0F
   // Chris Nafis (c) 2012
   dustDensity = 0.17 * calcVoltage - 0.1;
+
+  if (dustDensity < 0) {
+    dustDensity = 0;
+  }
   
 //  Serial.print("Dust Density = ");
 //  Serial.print(dustDensity); // unit: mg/m3
@@ -91,7 +93,7 @@ void loop() {
 
   // ug/mg3
   Serial.print("Dust Density = ");
-  Serial.print(dustDensity * 1000); // unit: mg/m3
+  Serial.print(dustDensity * 1000); // unit: ug/m3
   Serial.println(" ug/m3");
   
   //bmp280
@@ -129,30 +131,13 @@ void loop() {
   
   // Configure the equation to calculate CO concentration value
   MQ135.setA(605.18); MQ135.setB(-3.937);
-  float CO = MQ135.readSensor();
+  float CO = gasStatus ? MQ135.readSensor() : defaultValue;
   
   //Configure the equation to calculate Alcohol concentration value
   MQ135.setA(77.255); MQ135.setB(-3.18);
-  float Alcohol = MQ135.readSensor();
+  float Alcohol = gasStatus ? MQ135.readSensor() : defaultValue;
 
   // Configure the equation to calculate CO2 concentration value
-  MQ135.setA(110.47); MQ135.setB(-2.862); 
-  float CO2 = MQ135.readSensor();
-
-  // Configure the equation to calculate Toluen concentration value
-  MQ135.setA(44.947); MQ135.setB(-3.445); 
-  float Toluen = MQ135.readSensor();
-
-  // Configure the equation to calculate NH4 concentration value
-  MQ135.setA(102.2 ); MQ135.setB(-2.473);
-  float NH4 = MQ135.readSensor();
-
-  // Configure the equation to calculate Aceton concentration value
-  MQ135.setA(34.668); MQ135.setB(-3.369);
-  float Aceton = MQ135.readSensor();
-  
-  Serial.print("CO = "); Serial.println(CO); 
-  Serial.print("Alcohol = "); Serial.println(Alcohol);
   /*
   Motivation:
   We have added 400 PPM because when the library is calibrated it assumes the current state of the
@@ -160,7 +145,24 @@ void loop() {
   https://www.lavanguardia.com/natural/20190514/462242832581/concentracion-dioxido-cabono-co2-atmosfera-bate-record-historia-humanidad.html
   Note: 400 Offset for CO2 source: https://github.com/miguel5612/MQSensorsLib/issues/29
   */
-  Serial.print("CO2 = "); Serial.println(CO2 + 400); 
+  MQ135.setA(110.47); MQ135.setB(-2.862); 
+  float CO2 = gasStatus ? (MQ135.readSensor() + 400) : defaultValue;
+
+  // Configure the equation to calculate Toluen concentration value
+  MQ135.setA(44.947); MQ135.setB(-3.445); 
+  float Toluen = gasStatus ? MQ135.readSensor() : defaultValue;
+
+  // Configure the equation to calculate NH4 concentration value
+  MQ135.setA(102.2 ); MQ135.setB(-2.473);
+  float NH4 = gasStatus ? MQ135.readSensor() : defaultValue;
+
+  // Configure the equation to calculate Aceton concentration value
+  MQ135.setA(34.668); MQ135.setB(-3.369);
+  float Aceton = gasStatus ? MQ135.readSensor() : defaultValue;
+  
+  Serial.print("CO = "); Serial.println(CO); 
+  Serial.print("Alcohol = "); Serial.println(Alcohol);
+  Serial.print("CO2 = "); Serial.println(CO2); 
   Serial.print("Toluen = "); Serial.println(Toluen); 
   Serial.print("NH4 = "); Serial.println(NH4); 
   Serial.print("Aceton = "); Serial.println(Aceton);
