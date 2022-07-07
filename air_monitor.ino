@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 //bmp280 I2C
 //esp32 SCL 22, SDA 21
 #include <Adafruit_BMP280.h>
@@ -78,23 +80,17 @@ void loop() {
   // recover voltage
   calcVoltage = voMeasured * (3.3 / 1024.0);
   
-  // linear eqaution taken from http://www.howmuchsnow.com/arduino/airquality/
-  // https://www.elecrow.com/wiki/index.php?title=Dust_Sensor-_GP2Y1010AU0F
-  // Chris Nafis (c) 2012
+  /*
+   * linear eqaution taken from http://www.howmuchsnow.com/arduino/airquality/
+   * https://www.elecrow.com/wiki/index.php?title=Dust_Sensor-_GP2Y1010AU0F
+   * Chris Nafis (c) 2012
+   * unit: mg/m3 --> ug/m3 unit = * 1000
+  */
   dustDensity = 0.17 * calcVoltage - 0.1;
-
+  
   if (dustDensity < 0) {
     dustDensity = 0;
   }
-  
-//  Serial.print("Dust Density = ");
-//  Serial.print(dustDensity); // unit: mg/m3
-//  Serial.println(" mg/m3");
-
-  // ug/mg3
-  Serial.print("Dust Density = ");
-  Serial.print(dustDensity * 1000); // unit: ug/m3
-  Serial.println(" ug/m3");
   
   //bmp280
   if (bmpStatus){
@@ -103,18 +99,6 @@ void loop() {
     approxAltitude = bmp.readAltitude(1013.25); /* Adjusted to local forecast! */
   }
   
-  Serial.print(F("Temperature = "));
-  Serial.print(temperature);
-  Serial.println(" *C");
-
-  Serial.print(F("Pressure = "));
-  Serial.print(pressure);
-  Serial.println(" Pa");
-
-  Serial.print(F("Approx altitude = "));
-  Serial.print(approxAltitude); 
-  Serial.println(" m");
-
   /*
   ----------MQ135----------
     Exponential regression:
@@ -159,14 +143,23 @@ void loop() {
   // Configure the equation to calculate Aceton concentration value
   MQ135.setA(34.668); MQ135.setB(-3.369);
   float Aceton = gasStatus ? MQ135.readSensor() : defaultValue;
-  
-  Serial.print("CO = "); Serial.println(CO); 
-  Serial.print("Alcohol = "); Serial.println(Alcohol);
-  Serial.print("CO2 = "); Serial.println(CO2); 
-  Serial.print("Toluen = "); Serial.println(Toluen); 
-  Serial.print("NH4 = "); Serial.println(NH4); 
-  Serial.print("Aceton = "); Serial.println(Aceton);
-  Serial.println();
+
+  StaticJsonDocument<300> JSONBuffer;
+
+  JSONBuffer["dustDensity"] = dustDensity * 1000; // unit: ug/m3
+  JSONBuffer["temperature"] = temperature; // *C
+  JSONBuffer["pressure"] = pressure; // Pa
+  JSONBuffer["approxAltitude"] = approxAltitude; // m
+  JSONBuffer["CO"] = CO;
+  JSONBuffer["alcohol"] = Alcohol;
+  JSONBuffer["CO2"] = CO2;
+  JSONBuffer["toluen"] = Toluen;
+  JSONBuffer["NH4"] = NH4;
+  JSONBuffer["aceton"] = Aceton;
+
+  char JSONString[300];
+  serializeJsonPretty(JSONBuffer, JSONString);
+  Serial.println(JSONString);
  
   delay(1000);
 }
