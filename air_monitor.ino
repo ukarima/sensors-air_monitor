@@ -1,16 +1,22 @@
 #include <ArduinoJson.h>
 #include "credentials.h"
 
+bool connectedStatus = true;
+
 // GSM setup
+#include <HardwareSerial.h>
+HardwareSerial SerialAT(1); 
+//#include <SoftwareSerial.h> 
+//SoftwareSerial SerialAT(33, 5);
+
 #define TINY_GSM_MODEM_BG96
 #define PWRKEY_PIN 25
 #define RESET_PIN 27
-#define TXD_PIN 33
-#define RXD_PIN 5
+#define TXD_PIN 5
+#define RXD_PIN 33 
 #define SerialMon Serial
 
-#include <SoftwareSerial.h> 
-SoftwareSerial SerialAT(TXD_PIN, RXD_PIN);
+int BAUDRATE = 115200;
 
 const char apn[] = APN_NAME;
 const char gprsUser[] = "";
@@ -28,7 +34,7 @@ TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 
 int counter = 0;
-const unsigned long period = 60*1000L; // do loop every 60s
+const unsigned long period = 1000L; // do loop every 60s
 unsigned long startMillis;
 unsigned long currentMillis;
 String csq;
@@ -172,6 +178,8 @@ void setup_modem() {
 
   if (modem.isGprsConnected()) {
     Serial.println("GPRS connected");
+    connectedStatus = false;
+    digitalWrite(19, LOW);  // turn the LED off
   }
 }
 
@@ -215,7 +223,10 @@ boolean setNwscanseq() {
 
 void setup() {
   SerialMon.begin(115200);
-  SerialAT.begin(9600);
+  pinMode(19, OUTPUT);
+  digitalWrite(19, HIGH); // turn the LED on
+  SerialAT.begin(BAUDRATE, SERIAL_8N1, RXD_PIN, TXD_PIN); 
+//  SerialAT.begin(9600);
   delay(10);
   setup_modem();
   
