@@ -23,12 +23,11 @@ WiFiClient client;
 PubSubClient mqtt(client);
 const char* broker = MQTT_BROKER;
 const char* topicPub = MQTT_TOPIC_PUB;
+const char* topicSub = MQTT_TOPIC_SUB;
 
-int counter = 0;
-const unsigned long period = 60*1000L; // do loop every 60s
+const unsigned long period = 2*1000L; // do loop every 60s
 unsigned long startMillis;
 unsigned long currentMillis;
-String csq;
 uint32_t lastReconnectAttempt = 0;
 
 //bmp280 I2C
@@ -79,9 +78,10 @@ void initWiFi() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int len) {
-  SerialMon.print("Message arrived [");
-  SerialMon.print(topic);
-  SerialMon.print("]: ");
+//  SerialMon.print("Message arrived [");
+//  SerialMon.print(topic);
+//  SerialMon.print("]: ");
+  SerialMon.print("[ARRIVED] ");
   SerialMon.write(payload, len);
   SerialMon.println();
 }
@@ -147,11 +147,7 @@ void setup() {
 }
 
 void loop() {
-  currentMillis = millis();
-  if (currentMillis - startMillis >= period) {
-    startMillis = currentMillis;
-
-    if (!mqtt.connected()) {
+  if (!mqtt.connected()) {
       SerialMon.println("=== MQTT NOT CONNECTED ===");
       // Reconnect every 10 seconds
       uint32_t t = millis();
@@ -164,6 +160,9 @@ void loop() {
       delay(100);
       return;
     }
+  currentMillis = millis();
+  if (currentMillis - startMillis >= period) {
+    startMillis = currentMillis;
 
     //pm2.5
     digitalWrite(ledPower,LOW); // power on the LED
@@ -260,22 +259,25 @@ void loop() {
 
     JSONBuffer["date"] = dateStamp;
     JSONBuffer["time"] = timeStamp;
-    JSONBuffer["dustDensity"] = dustDensity * 1000; // unit: ug/m3
-    JSONBuffer["temperature"] = temperature; // *C
-    JSONBuffer["pressure"] = pressure; // Pa
-    JSONBuffer["approxAltitude"] = approxAltitude; // m
+    JSONBuffer["dust"] = round(dustDensity * 1000); // unit: ug/m3
+    JSONBuffer["temp"] = temperature; // *C
+    JSONBuffer["pressure"] = round(pressure); // Pa
+    JSONBuffer["altitude"] = round(approxAltitude); // m
     JSONBuffer["CO"] = CO;
     JSONBuffer["alcohol"] = Alcohol;
     JSONBuffer["CO2"] = CO2;
-    JSONBuffer["toluen"] = Toluen;
+    JSONBuffer["C7H8"] = Toluen;
     JSONBuffer["NH4"] = NH4;
     JSONBuffer["aceton"] = Aceton;
 
     char JSONString[300];
     
     serializeJson(JSONBuffer, JSONString);
-    SerialMon.println(JSONString);
     mqtt.publish(topicPub, JSONString);
+    SerialMon.print("[SENT] ");
+    SerialMon.println(JSONString);
+    delay(100);
+    mqtt.subscribe(topicSub);
   }
   mqtt.loop();
 }
