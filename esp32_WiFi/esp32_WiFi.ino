@@ -30,6 +30,10 @@ unsigned long startMillis;
 unsigned long currentMillis;
 uint32_t lastReconnectAttempt = 0;
 
+//mq135
+#include "MQ135.h"
+int airQualityPin = 35;
+
 //bmp280 I2C
 //esp32 SCL 22, SDA 21
 #include <Adafruit_BMP280.h>
@@ -38,20 +42,6 @@ Adafruit_BMP280 bmp;
 unsigned bmpStatus;
 
 float temperature, pressure, approxAltitude = 0;
-
-//mq135
-#include <MQUnifiedsensor.h>
-
-#define Board ("ESP-32")
-#define Pin (35)
-#define Type ("MQ-135")
-#define Voltage_Resolution (3.3) // 3V3 <- IMPORTANT. Source: https://randomnerdtutorials.com/esp32-adc-analog-read-arduino-ide/
-#define ADC_Bit_Resolution (12) // ESP-32 bit resolution. Source: https://randomnerdtutorials.com/esp32-adc-analog-read-arduino-ide/
-#define RatioMQ135CleanAir 3.6 //RS / R0 = 3.6 ppm  
-
-bool gasStatus = true;
-float defaultValue = 0;
-MQUnifiedsensor MQ135(Board, Voltage_Resolution, ADC_Bit_Resolution, Pin, Type);
 
 //pm2.5
 int measurePin = 34;
@@ -103,13 +93,16 @@ boolean mqttConnect() {
 
 void setup() {
   SerialMon.begin(115200);
-  pinMode(19, OUTPUT);
+  pinMode(19, OUTPUT); //blue led
   digitalWrite(19, HIGH); // turn the LED on
   delay(10);
   initWiFi();
 
   timeClient.begin();
   timeClient.setTimeOffset(25200);
+
+  //mq135
+  pinMode(airQualityPin, INPUT);
 
   //bmp280
   pinMode(ledPower,OUTPUT);  
@@ -121,24 +114,6 @@ void setup() {
                   Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
                   
-                  
-  //mq135 setting math model to calculate the PPM concentration and the value of constants & calibration
-  MQ135.setRegressionMethod(1); //_PPM =  a*ratio^b
-  MQ135.init(); 
-  SerialMon.print("Calibrating please wait.");
-  float calcR0 = 0;
-  for(int i = 1; i<=10; i ++)
-  {
-    MQ135.update();
-    calcR0 += MQ135.calibrate(RatioMQ135CleanAir);
-    SerialMon.print(".");
-  }
-  MQ135.setR0(calcR0/10);
-  SerialMon.println("  done!.");
-  if (isinf(calcR0) || calcR0 == 0) {
-    gasStatus = false;
-  }
-
   // MQTT setup
   mqtt.setServer(broker, 1883);
   mqtt.setCallback(mqttCallback);
@@ -163,7 +138,11 @@ void loop() {
   currentMillis = millis();
   if (currentMillis - startMillis >= period) {
     startMillis = currentMillis;
-
+    
+    //mq135
+    MQ135 gasSensor = MQ135(airQualityPin);
+    float airQuality = gasSensor.getPPM();
+    
     //pm2.5
     digitalWrite(ledPower,LOW); // power on the LED
     delayMicroseconds(samplingTime);
@@ -197,51 +176,6 @@ void loop() {
       approxAltitude = bmp.readAltitude(1013.25); /* Adjusted to local forecast! */
     }
   
-    /*
-    ----------MQ135----------
-      Exponential regression:
-    GAS      | a      | b
-    CO       | 605.18 | -3.937  
-    Alcohol  | 77.255 | -3.18 
-    CO2      | 110.47 | -2.862
-    Toluen  | 44.947 | -3.445
-    NH4      | 102.2  | -2.473
-    Aceton  | 34.668 | -3.369
-    */
-
-    MQ135.update();
-  
-    // Configure the equation to calculate CO concentration value
-    MQ135.setA(605.18); MQ135.setB(-3.937);
-    float CO = gasStatus ? MQ135.readSensor() : defaultValue;
-  
-    //Configure the equation to calculate Alcohol concentration value
-    MQ135.setA(77.255); MQ135.setB(-3.18);
-    float Alcohol = gasStatus ? MQ135.readSensor() : defaultValue;
-
-    // Configure the equation to calculate CO2 concentration value
-    /*
-    Motivation:
-    We have added 400 PPM because when the library is calibrated it assumes the current state of the
-    air as 0 PPM, and it is considered today that the CO2 present in the atmosphere is around 400 PPM.
-    https://www.lavanguardia.com/natural/20190514/462242832581/concentracion-dioxido-cabono-co2-atmosfera-bate-record-historia-humanidad.html
-    Note: 400 Offset for CO2 source: https://github.com/miguel5612/MQSensorsLib/issues/29
-    */
-    MQ135.setA(110.47); MQ135.setB(-2.862); 
-    float CO2 = gasStatus ? (MQ135.readSensor() + 400) : defaultValue;
-
-    // Configure the equation to calculate Toluen concentration value
-    MQ135.setA(44.947); MQ135.setB(-3.445); 
-    float Toluen = gasStatus ? MQ135.readSensor() : defaultValue;
-
-    // Configure the equation to calculate NH4 concentration value
-    MQ135.setA(102.2 ); MQ135.setB(-2.473);
-    float NH4 = gasStatus ? MQ135.readSensor() : defaultValue;
-
-    // Configure the equation to calculate Aceton concentration value
-    MQ135.setA(34.668); MQ135.setB(-3.369);
-    float Aceton = gasStatus ? MQ135.readSensor() : defaultValue;
-
     while(!timeClient.update()) {
       timeClient.forceUpdate();
     }
@@ -255,22 +189,17 @@ void loop() {
     // Extract time
     timeStamp = formattedDate.substring(splitT+1, formattedDate.length()-1);
 
-    StaticJsonDocument<300> JSONBuffer;
+    StaticJsonDocument<256> JSONBuffer;
 
     JSONBuffer["date"] = dateStamp;
     JSONBuffer["time"] = timeStamp;
-    JSONBuffer["dust"] = round(dustDensity * 1000); // unit: ug/m3
-    JSONBuffer["temp"] = temperature; // *C
-    JSONBuffer["pressure"] = round(pressure); // Pa
-    JSONBuffer["altitude"] = round(approxAltitude); // m
-    JSONBuffer["CO"] = CO;
-    JSONBuffer["alcohol"] = Alcohol;
-    JSONBuffer["CO2"] = CO2;
-    JSONBuffer["C7H8"] = Toluen;
-    JSONBuffer["NH4"] = NH4;
-    JSONBuffer["aceton"] = Aceton;
+    JSONBuffer["airQuality"] = airQuality; // unit: ug/m3
+    JSONBuffer["dustDensity"] = dustDensity * 1000; // unit: ug/m3
+    JSONBuffer["temperature"] = temperature; // *C
+    JSONBuffer["pressure"] = pressure; // Pa
+    JSONBuffer["approxAltitude"] = approxAltitude; // m
 
-    char JSONString[300];
+    char JSONString[256];
     
     serializeJson(JSONBuffer, JSONString);
     mqtt.publish(topicPub, JSONString);
