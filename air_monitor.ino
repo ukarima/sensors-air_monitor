@@ -40,14 +40,14 @@ unsigned long currentMillis;
 String csq;
 uint32_t lastReconnectAttempt = 0;
 
-//bmp280 I2C
-//esp32 SCL 22, SDA 21
-#include <Adafruit_BMP280.h>
+//dht22
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
 
-Adafruit_BMP280 bmp;
-unsigned bmpStatus;
+#define DHTPIN 18
+#define DHTTYPE DHT22
 
-float temperature, pressure, approxAltitude = 0;
+DHT dht(DHTPIN, DHTTYPE);
 
 //mq135
 #include "MQ135.h"
@@ -63,6 +63,7 @@ unsigned int sleepTime = 9680;
 
 float voMeasured, calcVoltage, dustDensity = 0;
 
+//timestamp
 String dateStamp;
 String timeStamp;
 
@@ -230,15 +231,11 @@ void setup() {
   //mq135
   pinMode(airQualityPin, INPUT);
 
-  //bmp280
-  pinMode(ledPower,OUTPUT);  
-  bmpStatus = bmp.begin(0x76);
-  /* Default settings from datasheet. */
-  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
-                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
-                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
-                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
-                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+  //dht22
+  dht.begin();
+
+  //pm2.5
+  pinMode(ledPower,OUTPUT);
   
   startMillis = millis();
 }
@@ -283,7 +280,7 @@ void loop() {
     //mq135
     MQ135 gasSensor = MQ135(airQualityPin);
     float airQuality = gasSensor.getPPM();
-    
+
     //pm2.5
     digitalWrite(ledPower,LOW); // power on the LED
     delayMicroseconds(samplingTime);
@@ -310,22 +307,28 @@ void loop() {
       dustDensity = 0;
     }
   
-    //bmp280
-    if (bmpStatus){
-      temperature = bmp.readTemperature();
-      pressure = bmp.readPressure();
-      approxAltitude = bmp.readAltitude(1013.25); /* Adjusted to local forecast! */
+    //dht22
+    float h = dht.readHumidity();
+    float t = dht.readTemperature(); // °C
+
+    if (isnan(h) || isnan(t)) {
+      h,t = 0;
+    }    
+    
+    // Compute heat index in Celsius (isFahreheit = false)
+    float hic = dht.computeHeatIndex(t, h, false);
+
+    if (hic < 0) {
+      hic = 0;
     }
-  
+
     StaticJsonDocument<256> JSONBuffer;
     
     JSONBuffer["date"] = dateStamp;
     JSONBuffer["time"] = timeStamp;
-    JSONBuffer["airQuality"] = airQuality; // unit: ug/m3
+    JSONBuffer["heatIndex"] = hic; // °C
+    JSONBuffer["airQuality"] = airQuality; // ppm
     JSONBuffer["dustDensity"] = dustDensity * 1000; // unit: ug/m3
-    JSONBuffer["temperature"] = temperature; // *C
-    JSONBuffer["pressure"] = pressure; // Pa
-    JSONBuffer["approxAltitude"] = approxAltitude; // m
 
     char JSONString[256];
     
