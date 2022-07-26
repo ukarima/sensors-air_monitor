@@ -54,14 +54,13 @@ DHT dht(DHTPIN, DHTTYPE);
 int airQualityPin = 35;
 
 //pm2.5
+#include <GP2Y1010AU0F.h>
 int measurePin = 34;
-int ledPower = 26;
+int ledPin     = 26;
 
-unsigned int samplingTime = 280;
-unsigned int deltaTime = 40;
-unsigned int sleepTime = 9680;
+GP2Y1010AU0F dustSensor(ledPin, measurePin);
+float dustDensity = 0;
 
-float voMeasured, calcVoltage, dustDensity = 0;
 
 //timestamp
 String dateStamp;
@@ -235,7 +234,7 @@ void setup() {
   dht.begin();
 
   //pm2.5
-  pinMode(ledPower,OUTPUT);
+  dustSensor.begin();
   
   startMillis = millis();
 }
@@ -282,26 +281,7 @@ void loop() {
     float airQuality = gasSensor.getPPM();
 
     //pm2.5
-    digitalWrite(ledPower,LOW); // power on the LED
-    delayMicroseconds(samplingTime);
-  
-    voMeasured = analogRead(measurePin); // read the dust value
-  
-    delayMicroseconds(deltaTime);
-    digitalWrite(ledPower,HIGH); // turn the LED off
-    delayMicroseconds(sleepTime);
-
-    // 0 - 3.3V mapped to 0 - 1023 integer values
-    // recover voltage
-    calcVoltage = voMeasured * (3.3 / 1024.0);
-  
-    /*
-    * linear eqaution taken from http://www.howmuchsnow.com/arduino/airquality/
-    * https://www.elecrow.com/wiki/index.php?title=Dust_Sensor-_GP2Y1010AU0F
-    * Chris Nafis (c) 2012
-    * unit: mg/m3 --> ug/m3 unit = * 1000
-    */
-    dustDensity = 0.17 * calcVoltage - 0.1;
+    dustDensity = dustSensor.read();
   
     if (dustDensity < 0) {
       dustDensity = 0;
@@ -328,7 +308,7 @@ void loop() {
     JSONBuffer["time"] = timeStamp;
     JSONBuffer["heatIndex"] = hic; // °C
     JSONBuffer["airQuality"] = airQuality; // ppm
-    JSONBuffer["dustDensity"] = dustDensity * 1000; // unit: ug/m3
+    JSONBuffer["dustDensity"] = dustDensity; // unit: ug/m3
 
     char JSONString[256];
     
